@@ -8,8 +8,8 @@ import { SEED_PRODUCTS, DEFAULT_SETTINGS } from "../data/seed";
 // casual visitor's hands, but it is not bank-grade security — if you need real
 // protection for many users, use the Supabase version instead.
 // ---------------------------------------------------------------------------
-const ADMIN_USERNAME = "Jagadeesh";
-const ADMIN_PASSWORD = "FOA@2026";
+const ADMIN_USERNAME = "Jagadeeswar";
+const ADMIN_PASSWORD = "Haritha@1978";
 
 const KEYS = {
   products: "foa.products.v1",
