@@ -1,8 +1,7 @@
-// Reads an uploaded image File, scales it down so the longest edge is at most
-// `maxEdge` px, compresses to JPEG, and returns a data URL. Keeping images
-// small matters here because the no-backend build stores them in localStorage
-// (which has roughly a 5 MB total budget).
-export function fileToResizedDataURL(file, maxEdge = 900, quality = 0.82) {
+// Resizes an uploaded image File so its longest edge is at most `maxEdge` px,
+// compresses to JPEG, and returns a Blob ready to upload to Supabase Storage.
+// Keeping uploads small keeps the bucket lean and pages fast.
+export function resizeToBlob(file, maxEdge = 1100, quality = 0.85) {
   return new Promise((resolve, reject) => {
     if (!file || !file.type.startsWith("image/")) {
       reject(new Error("Please choose an image file."));
@@ -25,9 +24,12 @@ export function fileToResizedDataURL(file, maxEdge = 900, quality = 0.82) {
         const canvas = document.createElement("canvas");
         canvas.width = width;
         canvas.height = height;
-        const ctx = canvas.getContext("2d");
-        ctx.drawImage(img, 0, 0, width, height);
-        resolve(canvas.toDataURL("image/jpeg", quality));
+        canvas.getContext("2d").drawImage(img, 0, 0, width, height);
+        canvas.toBlob(
+          (blob) => (blob ? resolve(blob) : reject(new Error("Could not process the image."))),
+          "image/jpeg",
+          quality
+        );
       };
       img.src = reader.result;
     };
