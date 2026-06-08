@@ -1,109 +1,204 @@
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
-import { SEED_PRODUCTS, DEFAULT_SETTINGS } from "../data/seed";
+import { supabase, IMAGE_BUCKET } from "../lib/supabase";
+import { DEFAULT_SETTINGS, SEED_PRODUCTS } from "../data/seed";
+import { resizeToBlob } from "../lib/image";
 
 // ---------------------------------------------------------------------------
-// Admin credentials (demo). CHANGE THESE before sharing the site.
-// Because this build has no backend, "login" is a client-side check and the
-// session is remembered in localStorage. It keeps the admin panel out of a
-// casual visitor's hands, but it is not bank-grade security — if you need real
-// protection for many users, use the Supabase version instead.
+// Map between the database row shape (snake_case) and the app shape (camelCase).
 // ---------------------------------------------------------------------------
-const ADMIN_USERNAME = "Jagadeeswar";
-const ADMIN_PASSWORD = "Haritha@1978";
-
-const KEYS = {
-  products: "foa.products.v1",
-  settings: "foa.settings.v1",
-  auth: "foa.auth.v1",
-};
-
-function load(key, fallback) {
-  try {
-    const raw = localStorage.getItem(key);
-    return raw ? JSON.parse(raw) : fallback;
-  } catch {
-    return fallback;
-  }
+function fromRow(r) {
+  return {
+    id: r.id,
+    name: r.name,
+    type: r.type,
+    audience: r.audience,
+    price: Number(r.price),
+    size: r.size || undefined,
+    description: r.description || "",
+    notes: r.notes,
+    image: r.image || "",
+    topSeller: !!r.top_seller,
+    outOfStock: !!r.out_of_stock,
+  };
 }
 
-function save(key, value) {
-  try {
-    localStorage.setItem(key, JSON.stringify(value));
-  } catch (e) {
-    // Most likely the localStorage quota was exceeded (too many large images).
-    console.error("Could not save to localStorage:", e);
-    alert(
-      "Storage is full — this usually means too many large images. Try removing a product image or uploading smaller photos."
-    );
-  }
+// Build a DB row from a (possibly partial) product object.
+function toRow(p) {
+  const row = {};
+  if ("name" in p) row.name = p.name;
+  if ("type" in p) row.type = p.type;
+  if ("audience" in p) row.audience = p.audience;
+  if ("price" in p) row.price = p.price;
+  if ("size" in p) row.size = p.size ?? null;
+  if ("description" in p) row.description = p.description;
+  if ("notes" in p) row.notes = p.notes;
+  if ("image" in p) row.image = p.image;
+  if ("topSeller" in p) row.top_seller = p.topSeller;
+  if ("outOfStock" in p) row.out_of_stock = p.outOfStock;
+  return row;
+}
+
+function settingsFromRow(r) {
+  return {
+    whatsapp: r.whatsapp || "",
+    email: r.email || "",
+    tagline: r.tagline || "",
+    locations: Array.isArray(r.locations) ? r.locations : [],
+  };
 }
 
 const StoreContext = createContext(null);
 
 export function StoreProvider({ children }) {
-  const [products, setProducts] = useState(() => load(KEYS.products, SEED_PRODUCTS));
-  const [settings, setSettings] = useState(() => load(KEYS.settings, DEFAULT_SETTINGS));
-  const [isAdmin, setIsAdmin] = useState(() => load(KEYS.auth, false));
+  const [products, setProducts] = useState([]);
+  const [settings, setSettings] = useState(DEFAULT_SETTINGS);
+  const [session, setSession] = useState(null);
+  const [loading, setLoading] = useState(true);
 
-  useEffect(() => save(KEYS.products, products), [products]);
-  useEffect(() => save(KEYS.settings, settings), [settings]);
-  useEffect(() => save(KEYS.auth, isAdmin), [isAdmin]);
+  // Pull the latest catalogue + settings from the database.
+  async function refresh() {
+    const [{ data: prods }, { data: sett }] = await Promise.all([
+      supabase.from("products").select("*").order("created_at", { ascending: false }),
+      supabase.from("settings").select("*").eq("id", 1).maybeSingle(),
+    ]);
+    if (prods) setProducts(prods.map(fromRow));
+    if (sett) setSettings(settingsFromRow(sett));
+  }
 
-  const api = useMemo(
-    () => ({
+  useEffect(() => {
+    let active = true;
+
+    (async () => {
+      try {
+        await refresh();
+      } finally {
+        if (active) setLoading(false);
+      }
+    })();
+
+    // Track admin auth session.
+    supabase.auth.getSession().then(({ data }) => active && setSession(data.session));
+    const { data: authSub } = supabase.auth.onAuthStateChange((_e, s) =>
+      setSession(s)
+    );
+
+    // Live updates: when the admin changes the data, every open storefront
+    // refetches automatically — no manual refresh needed.
+    const channel = supabase
+      .channel("foa-live")
+      .on("postgres_changes", { event: "*", schema: "public", table: "products" }, refresh)
+      .on("postgres_changes", { event: "*", schema: "public", table: "settings" }, refresh)
+      .subscribe();
+
+    return () => {
+      active = false;
+      authSub.subscription.unsubscribe();
+      supabase.removeChannel(channel);
+    };
+  }, []);
+
+  const api = useMemo(() => {
+    return {
       products,
       settings,
-      isAdmin,
+      loading,
+      isAdmin: !!session,
 
-      // ---- auth ----
-      login(username, password) {
-        const ok =
-          username.trim() === ADMIN_USERNAME && password === ADMIN_PASSWORD;
-        if (ok) setIsAdmin(true);
-        return ok;
+      // ---- auth (Supabase email/password) ----
+      async login(email, password) {
+        const { error } = await supabase.auth.signInWithPassword({
+          email: email.trim(),
+          password,
+        });
+        return { ok: !error, error: error?.message };
       },
-      logout() {
-        setIsAdmin(false);
+      async logout() {
+        await supabase.auth.signOut();
       },
 
       // ---- products ----
       getProduct(id) {
         return products.find((p) => p.id === id) || null;
       },
-      addProduct(product) {
-        const id = product.id || `p-${Date.now()}`;
-        setProducts((prev) => [{ ...product, id }, ...prev]);
-        return id;
+      async addProduct(product) {
+        const { data, error } = await supabase
+          .from("products")
+          .insert(toRow(product))
+          .select()
+          .single();
+        if (error) {
+          alert("Could not add product: " + error.message);
+          return null;
+        }
+        setProducts((prev) => [fromRow(data), ...prev]);
+        return data.id;
       },
-      updateProduct(id, patch) {
-        setProducts((prev) =>
-          prev.map((p) => (p.id === id ? { ...p, ...patch } : p))
-        );
+      async updateProduct(id, patch) {
+        const { data, error } = await supabase
+          .from("products")
+          .update(toRow(patch))
+          .eq("id", id)
+          .select()
+          .single();
+        if (error) {
+          alert("Could not save changes: " + error.message);
+          return;
+        }
+        setProducts((prev) => prev.map((p) => (p.id === id ? fromRow(data) : p)));
       },
-      deleteProduct(id) {
+      async deleteProduct(id) {
+        const { error } = await supabase.from("products").delete().eq("id", id);
+        if (error) {
+          alert("Could not delete: " + error.message);
+          return;
+        }
         setProducts((prev) => prev.filter((p) => p.id !== id));
       },
-      toggleStock(id) {
-        setProducts((prev) =>
-          prev.map((p) =>
-            p.id === id ? { ...p, outOfStock: !p.outOfStock } : p
-          )
-        );
+      async toggleStock(id) {
+        const current = products.find((p) => p.id === id);
+        if (!current) return;
+        await api.updateProduct(id, { outOfStock: !current.outOfStock });
+      },
+
+      // ---- images (Supabase Storage) ----
+      async uploadImage(file) {
+        const blob = await resizeToBlob(file);
+        const path = `products/${Date.now()}-${Math.random().toString(36).slice(2)}.jpg`;
+        const { error } = await supabase.storage
+          .from(IMAGE_BUCKET)
+          .upload(path, blob, { contentType: "image/jpeg", upsert: false });
+        if (error) throw error;
+        const { data } = supabase.storage.from(IMAGE_BUCKET).getPublicUrl(path);
+        return data.publicUrl;
       },
 
       // ---- settings ----
-      updateSettings(patch) {
-        setSettings((prev) => ({ ...prev, ...patch }));
+      async updateSettings(patch) {
+        const next = { ...settings, ...patch };
+        const { error } = await supabase
+          .from("settings")
+          .upsert({ id: 1, ...next });
+        if (error) {
+          alert("Could not save settings: " + error.message);
+          return;
+        }
+        setSettings(next);
       },
 
-      // ---- reset ----
-      resetAll() {
-        setProducts(SEED_PRODUCTS);
-        setSettings(DEFAULT_SETTINGS);
+      // ---- first-run helper: insert the sample catalogue ----
+      async loadSamples() {
+        const { error } = await supabase.from("products").insert(SEED_PRODUCTS.map(toRow));
+        if (error) {
+          alert("Could not load samples: " + error.message);
+          return;
+        }
+        await refresh();
       },
-    }),
-    [products, settings, isAdmin]
-  );
+
+      refresh,
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [products, settings, loading, session]);
 
   return <StoreContext.Provider value={api}>{children}</StoreContext.Provider>;
 }
