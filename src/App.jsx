@@ -24,6 +24,21 @@ function AdminRoute() {
 }
 
 function Shell() {
+  const { loading } = useStore();
+
+  if (loading) {
+    return (
+      <div style={{ minHeight: "100vh", display: "grid", placeItems: "center" }}>
+        <div style={{ textAlign: "center" }}>
+          <div className="foa-spinner" />
+          <p style={{ color: "var(--text-dim)", marginTop: 16, letterSpacing: "0.2em", textTransform: "uppercase", fontSize: "0.72rem" }}>
+            Loading
+          </p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div style={{ display: "flex", flexDirection: "column", minHeight: "100vh" }}>
       <ScrollToTop />
