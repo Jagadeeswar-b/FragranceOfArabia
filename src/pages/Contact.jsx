@@ -10,7 +10,7 @@ export default function Contact() {
         Visit Us
       </h1>
       <p style={{ color: "var(--text-dim)", maxWidth: 560, marginBottom: 36 }}>
-        Find us at any of our four locations, or reach out on WhatsApp to ask
+        Find us at any of our three locations, or reach out on WhatsApp to ask
         about a fragrance before you stop by.
       </p>
 

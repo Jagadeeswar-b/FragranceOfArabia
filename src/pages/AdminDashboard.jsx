@@ -1,14 +1,12 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useStore } from "../store/useStore";
-import { TYPES, PERFUME_SIZES, CATEGORIES, AUDIENCES } from "../data/seed";
-import { fileToResizedDataURL } from "../lib/image";
+import { TYPES, PERFUME_SIZES, AUDIENCES } from "../data/seed";
 import ProductImage from "../components/ProductImage";
 
 const EMPTY = {
   name: "",
   type: "Perfume",
-  category: "Oud",
   audience: "Unisex",
   price: "",
   size: "50ml",
@@ -26,7 +24,6 @@ function toForm(p) {
   return {
     name: p.name || "",
     type: p.type || "Perfume",
-    category: p.category || "Oud",
     audience: p.audience || "Unisex",
     price: String(p.price ?? ""),
     size: p.size || "50ml",
@@ -45,7 +42,6 @@ function fromForm(form) {
   return {
     name: form.name.trim(),
     type: form.type,
-    category: form.category,
     audience: form.audience,
     price: Number(form.price) || 0,
     size: isPerfume ? form.size : undefined,
@@ -58,6 +54,7 @@ function fromForm(form) {
 }
 
 function ProductForm({ initial, onSave, onCancel }) {
+  const { uploadImage } = useStore();
   const [form, setForm] = useState(initial);
   const [busy, setBusy] = useState(false);
   const isPerfume = form.type === "Perfume";
@@ -68,10 +65,10 @@ function ProductForm({ initial, onSave, onCancel }) {
     if (!file) return;
     setBusy(true);
     try {
-      const dataUrl = await fileToResizedDataURL(file);
-      set({ image: dataUrl });
+      const url = await uploadImage(file);
+      set({ image: url });
     } catch (err) {
-      alert(err.message);
+      alert("Image upload failed: " + (err.message || err));
     } finally {
       setBusy(false);
     }
@@ -126,14 +123,6 @@ function ProductForm({ initial, onSave, onCancel }) {
               <select className="select" value={form.type} onChange={(e) => set({ type: e.target.value })}>
                 {TYPES.map((t) => (
                   <option key={t}>{t}</option>
-                ))}
-              </select>
-            </div>
-            <div className="field" style={{ marginBottom: 0 }}>
-              <label>Category</label>
-              <select className="select" value={form.category} onChange={(e) => set({ category: e.target.value })}>
-                {CATEGORIES.map((c) => (
-                  <option key={c}>{c}</option>
                 ))}
               </select>
             </div>
@@ -212,13 +201,13 @@ function ProductForm({ initial, onSave, onCancel }) {
 }
 
 function ProductsTab() {
-  const { products, addProduct, updateProduct, deleteProduct, toggleStock } = useStore();
+  const { products, addProduct, updateProduct, deleteProduct, toggleStock, loadSamples } = useStore();
   const [editingId, setEditingId] = useState(null); // product id, or "new", or null
   const editing = editingId === "new" ? EMPTY : editingId ? toForm(products.find((p) => p.id === editingId)) : null;
 
-  function handleSave(data) {
-    if (editingId === "new") addProduct(data);
-    else updateProduct(editingId, data);
+  async function handleSave(data) {
+    if (editingId === "new") await addProduct(data);
+    else await updateProduct(editingId, data);
     setEditingId(null);
   }
 
@@ -232,6 +221,31 @@ function ProductsTab() {
           </button>
         )}
       </div>
+
+      {products.length === 0 && editingId === null && (
+        <div
+          style={{
+            border: "1px dashed var(--line-2)",
+            borderRadius: "var(--radius)",
+            padding: 28,
+            textAlign: "center",
+            marginBottom: 24,
+          }}
+        >
+          <p style={{ color: "var(--text-soft)", marginBottom: 14 }}>
+            Your catalogue is empty. Add your first product, or load the sample
+            set to see how everything looks.
+          </p>
+          <button
+            className="btn btn-ghost btn-sm"
+            onClick={() => {
+              if (confirm("Add the six sample products to your store?")) loadSamples();
+            }}
+          >
+            Load sample products
+          </button>
+        </div>
+      )}
 
       {editing && (
         <ProductForm initial={editing} onSave={handleSave} onCancel={() => setEditingId(null)} />
@@ -291,7 +305,13 @@ function ProductsTab() {
 function SettingsTab() {
   const { settings, updateSettings } = useStore();
   const [form, setForm] = useState(settings);
+  const [busy, setBusy] = useState(false);
   const set = (patch) => setForm((f) => ({ ...f, ...patch }));
+
+  // Keep the form in step with the database value once it loads / changes.
+  useEffect(() => {
+    setForm(settings);
+  }, [settings]);
 
   function setLocation(id, patch) {
     set({ locations: form.locations.map((l) => (l.id === id ? { ...l, ...patch } : l)) });
@@ -302,8 +322,10 @@ function SettingsTab() {
   function removeLocation(id) {
     set({ locations: form.locations.filter((l) => l.id !== id) });
   }
-  function save() {
-    updateSettings(form);
+  async function save() {
+    setBusy(true);
+    await updateSettings(form);
+    setBusy(false);
     alert("Settings saved.");
   }
 
@@ -350,15 +372,15 @@ function SettingsTab() {
         </div>
       ))}
 
-      <button className="btn" style={{ marginTop: 12 }} onClick={save}>
-        Save settings
+      <button className="btn" style={{ marginTop: 12 }} onClick={save} disabled={busy}>
+        {busy ? "Saving…" : "Save settings"}
       </button>
     </div>
   );
 }
 
 export default function AdminDashboard() {
-  const { logout, resetAll } = useStore();
+  const { logout } = useStore();
   const navigate = useNavigate();
   const [tab, setTab] = useState("products");
 
@@ -371,17 +393,9 @@ export default function AdminDashboard() {
         </div>
         <div style={{ display: "flex", gap: 10 }}>
           <button
-            className="btn btn-danger btn-sm"
-            onClick={() => {
-              if (confirm("Reset all products and settings to the original samples?")) resetAll();
-            }}
-          >
-            Reset to defaults
-          </button>
-          <button
             className="btn btn-ghost btn-sm"
-            onClick={() => {
-              logout();
+            onClick={async () => {
+              await logout();
               navigate("/");
             }}
           >

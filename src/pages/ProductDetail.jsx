@@ -87,7 +87,6 @@ export default function ProductDetail() {
         <div>
           <span style={{ fontSize: "0.7rem", letterSpacing: "0.22em", textTransform: "uppercase", color: "var(--gold)" }}>
             {product.type}
-            {product.category ? ` · ${product.category}` : ""}
             {product.audience ? ` · ${product.audience}` : ""}
           </span>
           <h1 style={{ fontSize: "clamp(2rem, 4vw, 3rem)", margin: "8px 0 10px" }}>

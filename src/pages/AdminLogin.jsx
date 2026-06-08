@@ -5,16 +5,18 @@ import { useStore } from "../store/useStore";
 export default function AdminLogin() {
   const { login } = useStore();
   const navigate = useNavigate();
-  const [username, setUsername] = useState("");
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
 
-  function submit() {
-    if (login(username, password)) {
-      navigate("/admin");
-    } else {
-      setError("Incorrect username or password.");
-    }
+  async function submit() {
+    setBusy(true);
+    setError("");
+    const { ok, error } = await login(email, password);
+    setBusy(false);
+    if (ok) navigate("/admin");
+    else setError(error || "Incorrect email or password.");
   }
 
   return (
@@ -38,11 +40,12 @@ export default function AdminLogin() {
         <hr className="hr-gold" style={{ margin: "16px auto 26px" }} />
 
         <div className="field">
-          <label>Username</label>
+          <label>Email</label>
           <input
             className="input"
-            value={username}
-            onChange={(e) => setUsername(e.target.value)}
+            type="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && submit()}
             autoFocus
           />
@@ -64,14 +67,14 @@ export default function AdminLogin() {
           </p>
         )}
 
-        <button className="btn" style={{ width: "100%" }} onClick={submit}>
-          Sign In
+        <button className="btn" style={{ width: "100%" }} onClick={submit} disabled={busy}>
+          {busy ? "Signing in…" : "Sign In"}
         </button>
 
-        {/* <p style={{ color: "var(--text-dim)", fontSize: "0.78rem", marginTop: 18, textAlign: "center" }}>
-          Demo login — <strong>admin</strong> / <strong>arabia2026</strong>.
-          Change these in <code>src/store/useStore.jsx</code> before going live.
-        </p> */}
+        <p style={{ color: "var(--text-dim)", fontSize: "0.78rem", marginTop: 18, textAlign: "center" }}>
+          Use the admin account you created in Supabase
+          (Authentication → Users → Add user).
+        </p>
       </div>
     </div>
   );
