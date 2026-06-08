@@ -1,8 +1,34 @@
 # Fragrance of Arabia
 
 A storefront for pure oil-based perfumes imported from Dubai & the UAE.
-No backend required — products and settings are stored in the browser
-(`localStorage`), so it runs with a single command.
+Now backed by **Supabase**, so when the admin adds or edits a product it goes
+**live for every customer** — and updates appear without a page refresh.
+
+## What changed from the local version
+
+- Products, settings, and store locations live in a Supabase database (not the
+  browser). Admin edits are shared with everyone.
+- Product images are uploaded to Supabase Storage (proper hosting), not stored
+  in the browser.
+- Admin login uses real Supabase Authentication (email + password).
+- The **Category** field was removed — products are organised by **Type**
+  (Perfume / Perfumed Oil / Roll-on / Combo) and **For** (Men / Women / Unisex).
+
+## One-time setup
+
+1. **Create a project** at https://supabase.com (free tier is fine).
+2. **Run the schema.** In the Supabase dashboard → SQL Editor → paste the
+   contents of `supabase/schema.sql` → Run. This creates the tables, the public
+   `product-images` storage bucket, security rules, and live updates.
+3. **Create the admin user.** Dashboard → Authentication → Users → Add user →
+   enter an email + password and tick "Auto confirm". This is your admin login.
+4. **Add your keys.** Dashboard → Project Settings → API. Copy `.env.example`
+   to `.env` and fill in:
+   ```
+   VITE_SUPABASE_URL=https://YOUR-PROJECT.supabase.co
+   VITE_SUPABASE_ANON_KEY=YOUR-ANON-PUBLIC-KEY
+   ```
+   (The anon key is safe to expose — writes are protected by the login + rules.)
 
 ## Run it
 
@@ -13,73 +39,58 @@ npm run dev
 
 Open the printed URL (usually http://localhost:5173).
 
-- Storefront: `/`
-- Shop: `/shop`
-- Product page: `/product/:id`
-- Contact / locations: `/contact`
-- Admin: `/admin`  →  **admin / arabia2026** (demo login)
+- Storefront: `/`  ·  Shop: `/shop`  ·  Contact: `/contact`
+- Admin (not linked publicly): `/admin` — sign in with the user you created.
+  Once logged in, a "Dashboard" link appears in the menu.
 
-## Build for production
+First time in, the catalogue is empty — click **Load sample products** in the
+dashboard to populate the six samples, or just add your own.
+
+## Deploy (Vercel)
 
 ```bash
 npm run build      # output in /dist
-npm run preview    # preview the production build
 ```
 
-Deploy `/dist` to any static host. `vercel.json` is included so deep links
-(e.g. `/admin`, `/product/...`) work after a refresh on Vercel.
+Push to Vercel and add the same two environment variables
+(`VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`) in the Vercel project settings.
+`vercel.json` is included so deep links work after a refresh.
 
-## What the admin can do
+## How security works
 
-Log in at `/admin`, then:
-
-- **Products tab** — add / edit / delete products; upload an image (auto-resized);
-  set type (Perfume / Perfumed Oil / Roll-on / Combo), category, price, and
-  description. Perfumes use Top / Middle / Base notes and a size of **30ml, 50ml,
-  or 100ml**; other types use a single notes line. Toggle **Bestseller** and
-  **Out of stock** (or use "Mark out / Mark in stock" in the list). Out-of-stock
-  items show a badge and hide the WhatsApp button.
-- **Settings tab** — set the WhatsApp number (digits only, country code first,
-  no `+`), contact email, tagline, and the store locations shown on the Contact
-  page and footer.
-- **Reset to defaults** restores the original sample catalogue and settings.
-
-## Important notes on this no-backend build
-
-- All data lives in **this browser only**. Admin edits are not visible to
-  customers on other devices, and clearing browser data wipes the catalogue.
-  This is the trade-off for "runs instantly with no setup." If you need edits to
-  go live for every visitor, use a backend (e.g. the Supabase version).
-- Change the demo credentials in `src/store/useStore.jsx` (`ADMIN_USERNAME`,
-  `ADMIN_PASSWORD`) before sharing the site. Client-side login keeps casual
-  visitors out but is not strong security.
-- Images are resized/compressed before storage to stay within the ~5 MB
-  `localStorage` budget. Very many large photos can still fill it up.
+- Anyone can **read** the catalogue (it's a public shop).
+- Only a **signed-in admin** can add, edit, or delete products and settings, or
+  upload images. This is enforced by Supabase Row Level Security in
+  `schema.sql`, so it holds even though the storefront code is public.
 
 ## File map
 
 ```
+.env.example               Supabase keys template (copy to .env)
 index.html                 entry + fonts + favicon
 public/favicon.svg         gold attar-bottle favicon
 vercel.json                SPA rewrite for deep links
+supabase/schema.sql        tables, security rules, storage bucket, realtime
 src/
   main.jsx                 React entry
-  App.jsx                  routes + layout + admin guard
+  App.jsx                  routes + layout + loading gate + admin guard
   index.css                design tokens + base styles
-  data/seed.js             sample products, default settings, option lists
-  lib/image.js             upload resizer (-> data URL)
-  store/useStore.jsx       localStorage-backed state + auth
+  data/seed.js             option lists, default settings, sample products
+  lib/
+    supabase.js            Supabase client + image bucket name
+    image.js               resizes uploads before they go to Storage
+  store/useStore.jsx       Supabase data, auth, image upload, live updates
   components/
-    Navbar.jsx
-    Footer.jsx
+    Navbar.jsx             hamburger menu on mobile; admin hidden from public
+    Footer.jsx             stacks on tablet + mobile
     ProductImage.jsx       photo or elegant placeholder
     ProductCard.jsx
     ProductGrid.jsx        responsive 1 / 2 / 3–4 per row
   pages/
     Home.jsx
-    Shop.jsx
+    Shop.jsx               filter by For (audience) and Type
     ProductDetail.jsx      notes pyramid for perfumes; single notes otherwise
     Contact.jsx            three store locations
-    AdminLogin.jsx
-    AdminDashboard.jsx     product CRUD + settings
+    AdminLogin.jsx         Supabase email/password
+    AdminDashboard.jsx     product CRUD + settings (live to all customers)
 ```
