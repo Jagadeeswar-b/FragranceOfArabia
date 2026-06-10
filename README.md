@@ -11,7 +11,7 @@ Now backed by **Supabase**, so when the admin adds or edits a product it goes
 - Product images are uploaded to Supabase Storage (proper hosting), not stored
   in the browser.
 - Admin login uses real Supabase Authentication (email + password).
-- The **Category** field was removed — products are organised by **Type**
+- The products are organised by **Type**
   (Perfume / Perfumed Oil / Roll-on / Combo) and **For** (Men / Women / Unisex).
 
 ## One-time setup
